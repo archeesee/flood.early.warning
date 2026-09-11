@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flood Risk Early-Warning System</title>
+<style>
+  :root {
+    --bg: #f5f7fb; --panel: #ffffff; --accent: #2563eb; --danger: #dc2626;
+    --safe: #16a34a; --text: #1a2233; --muted: #64748b; --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+  header { padding: 24px 32px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .status { display:inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; margin-left: 10px; }
+  .status.ok { background: rgba(22,163,74,0.1); color: var(--safe); }
+  .status.warn { background: rgba(220,38,38,0.1); color: var(--danger); }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 24px 32px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .panel h2 { margin-top: 0; font-size: 16px; }
+  label { display:block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 8px 10px; background: #fafbfd; border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 14px; }
+  button { margin-top: 16px; padding: 10px 16px; background: var(--accent); color: white; border: none;
+    border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; }
+  button:hover { opacity: 0.9; }
+  button.danger { background: var(--danger); }
+  .row { display:flex; gap: 10px; }
+  .row > div { flex: 1; }
+  #riskResult { margin-top: 16px; padding: 14px; border-radius: 8px; display: none; }
+  #riskResult.safe { background: rgba(22,163,74,0.08); border: 1px solid var(--safe); display:block; }
+  #riskResult.danger { background: rgba(220,38,38,0.08); border: 1px solid var(--danger); display:block; }
+  #riskResult .score { font-size: 28px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .full { grid-column: 1 / -1; }
+  .muted { color: var(--muted); font-size: 12px; }
+  #factorsGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+
+  /* Phone-style SMS popup */
+  #phoneNotif {
+    position: fixed; top: -140px; right: 24px; width: 340px;
+    background: #ffffff; border-radius: 16px; padding: 14px 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.15); z-index: 999;
+    transition: top 0.45s cubic-bezier(.17,.89,.32,1.28);
+    border: 1px solid #e5e7eb;
+  }
+  #phoneNotif.show { top: 24px; }
+  #phoneNotif .notifHead { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  #phoneNotif .notifIcon {
+    width: 26px; height: 26px; border-radius: 6px; background: var(--danger);
+    display:flex; align-items:center; justify-content:center; font-size: 14px; flex-shrink:0;
+  }
+  #phoneNotif .notifApp { font-size: 12px; color: #9ca3af; font-weight: 600; flex: 1; }
+  #phoneNotif .notifTime { font-size: 11px; color: #9ca3af; }
+  #phoneNotif .notifTitle { font-size: 14px; font-weight: 700; color: #111827; margin: 2px 0; }
+  #phoneNotif .notifBody { font-size: 13px; color: #374151; line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<div id="phoneNotif">
+  <div class="notifHead">
+    <div class="notifIcon">🌊</div>
+    <div class="notifApp">MESSAGES</div>
+    <div class="notifTime">now</div>
+  </div>
+  <div class="notifTitle" id="notifTitle">Flood Alert System</div>
+  <div class="notifBody" id="notifBody"></div>
+</div>
+
+<header>
+  <h1>🌊 Flood Risk Early-Warning Broadcast System</h1>
+  <p>Predicts regional flood risk and auto-alerts registered subscribers — no app-checking required.
+    <span class="status {{ 'ok' if model_loaded else 'warn' }}">{{ 'Model loaded' if model_loaded else 'Model not loaded — run the notebook first' }}</span>
+    <span class="status {{ 'ok' if twilio_enabled else 'warn' }}">{{ 'Live SMS (Twilio)' if twilio_enabled else 'Simulated SMS mode' }}</span>
+    <span class="muted">Alert threshold: {{ threshold }}</span>
+  </p>
+</header>
+
+<main>
+  <div class="panel">
+    <h2>📱 Register a Subscriber</h2>
+    <div class="row">
+      <div><label>Name</label><input id="regName" placeholder="Carmen"></div>
+      <div><label>Phone (+countrycode)</label><input id="regPhone" placeholder="+919999999999"></div>
+    </div>
+    <label>Area</label>
+    <input id="regArea" placeholder="Vikhroli East">
+    <button onclick="registerSubscriber()">Register</button>
+    <p id="regMsg" class="muted"></p>
+
+    <h2 style="margin-top:28px;">👥 Registered Subscribers</h2>
+    <table id="subTable"><thead><tr><th>Name</th><th>Phone</th><th>Area</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="panel">
+    <h2>🧪 Simulate Regional Readings</h2>
+    <p class="muted">Feed in factor values (0–10 typical scale in the source dataset) for a region and score it with the model.</p>
+    <label>Area name</label>
+    <input id="predArea" placeholder="Vikhroli East">
+    <div id="factorsGrid"></div>
+    <button onclick="runPrediction()">Score Region & Check Alert</button>
+    <button class="danger" onclick="fillHighRisk()">⚡ Fill Extreme Values (demo)</button>
+
+    <div id="riskResult">
+      <div class="score" id="riskScoreText"></div>
+      <div id="riskMsg"></div>
+    </div>
+  </div>
+
+  <div class="panel full">
+    <h2>🚨 Alert Log</h2>
+    <table id="alertTable">
+      <thead><tr><th>Time</th><th>Area</th><th>Risk Score</th><th>Alerts Sent</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+let FEATURE_COLUMNS = [];
+
+async function loadFeatureColumns() {
+  const res = await fetch('/api/feature-columns');
+  FEATURE_COLUMNS = await res.json();
+  const grid = document.getElementById('factorsGrid');
+  grid.innerHTML = '';
+  FEATURE_COLUMNS.forEach(col => {
+    grid.innerHTML += `<div><label>${col}</label><input type="number" step="0.1" id="f_${col}" value="5"></div>`;
+  });
+}
+
+function fillHighRisk() {
+  FEATURE_COLUMNS.forEach(col => {
+    document.getElementById(`f_${col}`).value = 9 + Math.random();
+  });
+}
+
+async function registerSubscriber() {
+  const name = document.getElementById('regName').value;
+  const phone = document.getElementById('regPhone').value;
+  const area = document.getElementById('regArea').value;
+  const res = await fetch('/api/register', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, phone, area})
+  });
+  const data = await res.json();
+  document.getElementById('regMsg').innerText = res.ok
+    ? `Registered! Total subscribers: ${data.total_subscribers}` : data.error;
+  loadSubscribers();
+}
+
+async function loadSubscribers() {
+  const res = await fetch('/api/subscribers');
+  const subs = await res.json();
+  const tbody = document.querySelector('#subTable tbody');
+  tbody.innerHTML = subs.map(s => `<tr><td>${s.name}</td><td>${s.phone}</td><td>${s.area}</td></tr>`).join('');
+}
+
+// Simple alert beep using Web Audio API — no external sound file needed
+function playAlertTone() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 660].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.35);
+      osc.start(ctx.currentTime + i * 0.18);
+      osc.stop(ctx.currentTime + i * 0.18 + 0.35);
+    });
+  } catch (e) { /* audio not available, ignore */ }
+}
+
+function showPhoneNotification(area, riskScore, recipientCount) {
+  document.getElementById('notifTitle').innerText = `Flood Alert — ${area}`;
+  document.getElementById('notifBody').innerText =
+    `⚠ FLOOD ALERT: Predicted flood risk is HIGH (${(riskScore*100).toFixed(0)}%). ` +
+    `Please move valuables to higher ground and stay updated with local authorities. ` +
+    `(Broadcast to ${recipientCount} subscriber${recipientCount === 1 ? '' : 's'} in ${area})`;
+
+  const notif = document.getElementById('phoneNotif');
+  playAlertTone();
+  notif.classList.add('show');
+  setTimeout(() => notif.classList.remove('show'), 6000);
+}
+
+async function runPrediction() {
+  const area = document.getElementById('predArea').value || 'Unknown Area';
+  const factors = {};
+  FEATURE_COLUMNS.forEach(col => {
+    factors[col] = parseFloat(document.getElementById(`f_${col}`).value) || 0;
+  });
+
+  const res = await fetch('/api/predict', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({area, factors})
+  });
+  const data = await res.json();
+  const box = document.getElementById('riskResult');
+  if (!res.ok) { box.className = 'danger'; box.style.display='block';
+    document.getElementById('riskScoreText').innerText = 'Error';
+    document.getElementById('riskMsg').innerText = data.error; return; }
+
+  box.className = data.alert_triggered ? 'danger' : 'safe';
+  document.getElementById('riskScoreText').innerText = (data.risk_score*100).toFixed(1) + '%';
+  document.getElementById('riskMsg').innerText = data.alert_triggered
+    ? `⚠ ALERT TRIGGERED for ${data.area} — ${data.alerts_sent ? data.alerts_sent.length : 0} subscriber(s) notified.`
+    : `Risk below threshold (${(data.threshold*100).toFixed(0)}%) — no alert sent.`;
+  loadAlertLog();
+}
+
+async function loadAlertLog() {
+  const res = await fetch('/api/alert-log');
+  const log = await res.json();
+  const tbody = document.querySelector('#alertTable tbody');
+  tbody.innerHTML = log.slice().reverse().map(a => `<tr>
+    <td>${new Date(a.timestamp).toLocaleString()}</td>
+    <td>${a.area}</td>
+    <td>${(a.risk_score*100).toFixed(1)}%</td>
+    <td>${a.alerts_sent ? a.alerts_sent.length : 0}</td>
+  </tr>`).join('');
+}
+
+loadFeatureColumns().then(() => { loadSubscribers(); loadAlertLog(); });
+</script>
+</body>
+</html>
