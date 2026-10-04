@@ -1,11 +1,8 @@
-flask
+streamlit
 pandas
 numpy
 scikit-learn
-xgboost
+tensorflow-cpu
 joblib
-matplotlib
-seaborn
-shap
+requests
 twilio
-gunicorn
